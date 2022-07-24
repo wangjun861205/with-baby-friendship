@@ -7,6 +7,20 @@ use std::pin::Pin;
 pub trait Persister {
     type UID;
     type Error: Debug + Send + Sync + 'static;
+    fn insert_node<'a>(
+        &'a self,
+        uid: Self::UID,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + 'a>>;
+    fn delete_node<'a>(
+        &'a self,
+        uid: Self::UID,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + 'a>>;
+
+    fn exist_node<'a>(
+        &'a self,
+        uid: Self::UID,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + 'a>>;
+
     fn insert<'a>(
         &'a self,
         uid_a: Self::UID,
@@ -23,6 +37,12 @@ pub trait Persister {
         &'a self,
         uid: Self::UID,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Self::UID>, Self::Error>> + 'a>>;
+
+    fn is_friend<'a>(
+        &'a self,
+        uid_a: Self::UID,
+        uid_b: Self::UID,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + 'a>>;
 
     fn recommendations<'a>(
         &'a self,
@@ -129,5 +149,19 @@ impl<U: Sized + Clone, P: Persister<UID = U>, C: Cacher<UID = U>, L: Logger>
             .map_err(|e| {
                 anyhow::Error::msg(format!("{:?}", e)).context("failed to get recommendation")
             })
+    }
+
+    pub async fn add_user(&self, uid: &U) -> Result<(), anyhow::Error> {
+        self.persister
+            .insert_node(uid.clone())
+            .await
+            .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
+    }
+
+    pub async fn delete_user(&self, uid: &U) -> Result<(), anyhow::Error> {
+        self.persister
+            .delete_node(uid.clone())
+            .await
+            .map_err(|e| anyhow::Error::msg(format!("{:?}", e)).context("failed to add user"))
     }
 }
