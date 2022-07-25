@@ -136,12 +136,10 @@ async fn main() {
     loop {
         for ms in k_consumer.poll().expect("failed to poll kafka").iter() {
             for m in ms.messages() {
-                if let Ok(_) = from_utf8(m.key) {
-                    if let Err(e) = handle_message(m.key, m.value, &mgr, &output).await {
-                        println!("{}", e);
-                    }
-                    k_consumer.commit_consumed().unwrap();
+                if let Err(e) = handle_message(m.key, m.value, &mgr, &output).await {
+                    println!("{}", e);
                 }
+                k_consumer.commit_consumed().unwrap();
             }
         }
     }
