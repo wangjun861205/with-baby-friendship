@@ -1,4 +1,5 @@
 use anyhow::Context;
+use serde::Serialize;
 use std::error::Error;
 use std::fmt::Debug;
 use std::future::Future;
