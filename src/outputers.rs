@@ -26,33 +26,19 @@ pub enum Response<T: Serialize> {
     Err { detail: String },
 }
 
-impl<'a, K: ToRedisArgs + 'a, E: std::fmt::Display> Outputer<'a, K, E, anyhow::Error>
-    for RedisOutput
-{
-    fn error(
-        &'a self,
-        key: K,
-        err: E,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + 'a>> {
+impl<K: ToRedisArgs, E: std::fmt::Display> Outputer<K, E, anyhow::Error> for RedisOutput {
+    fn error(&self, key: K, err: E) -> Result<(), anyhow::Error> {
         let res = serde_json::to_string(&Response::<()>::Err {
             detail: format!("{}", err),
         })
         .unwrap();
-        Box::pin(async move {
-            self.get()?.rpush(key, res)?;
-            Ok(())
-        })
+        self.get()?.rpush(key, res)?;
+        Ok(())
     }
 
-    fn ok<T: Serialize>(
-        &'a self,
-        key: K,
-        data: T,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), anyhow::Error>> + 'a>> {
+    fn ok<T: Serialize>(&self, key: K, data: T) -> Result<(), anyhow::Error> {
         let res = serde_json::to_string(&Response::<T>::Ok { data: data }).unwrap();
-        Box::pin(async move {
-            self.get()?.rpush(key, res)?;
-            Ok(())
-        })
+        self.get()?.rpush(key, res)?;
+        Ok(())
     }
 }

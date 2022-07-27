@@ -9,11 +9,9 @@ use crate::core::{Cacher, FriendManager, Logger, Persister};
 use anyhow::Context;
 use kafka::consumer::Consumer;
 use neo4rs::Graph;
-use redis::{self, Commands};
+use redis;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
-use std::pin::Pin;
-use std::str::from_utf8;
+use std::sync::Arc;
 use tokio;
 
 #[derive(Serialize, Deserialize)]
@@ -53,63 +51,47 @@ pub enum Response<T: Serialize> {
     Err { detail: String },
 }
 
-pub trait Outputer<'a, K, E, RE> {
-    fn ok<T: Serialize>(
-        &'a self,
-        key: K,
-        data: T,
-    ) -> Pin<Box<dyn Future<Output = Result<(), RE>> + 'a>>;
-    fn error(&'a self, key: K, err: E) -> Pin<Box<dyn Future<Output = Result<(), RE>> + 'a>>;
+pub trait Outputer<K, E, RE> {
+    fn ok<T: Serialize>(&self, key: K, data: T) -> Result<(), RE>;
+    fn error(&self, key: K, err: E) -> Result<(), RE>;
 }
 
-// impl<T: Serialize> Response<T> {
-//     fn ok(data: T) -> Self {
-//         Response::Ok { data }
-//     }
-//     fn error<E: std::fmt::Display>(err: E) -> Self {
-//         Response::Err {
-//             detail: format!("{}", err),
-//         }
-//     }
-// }
-
 async fn handle_message<
-    'a,
-    P: Persister<UID = i64>,
-    C: Cacher<UID = i64>,
-    L: Logger,
-    O: Outputer<'a, &'a [u8], anyhow::Error, anyhow::Error>,
+    P: Persister<UID = i64> + Send,
+    C: Cacher<UID = i64> + Send,
+    L: Logger + Send,
+    O: Outputer<Vec<u8>, anyhow::Error, anyhow::Error>,
 >(
-    key: &'a [u8],
-    body: &[u8],
+    key: Vec<u8>,
+    body: Vec<u8>,
     mgr: &FriendManager<P, C, L>,
-    out: &'a O,
+    out: &O,
 ) -> Result<(), anyhow::Error> {
-    let req = serde_json::from_slice::<Request>(body).context("failed to deserialize message")?;
+    let req = serde_json::from_slice::<Request>(&body).context("failed to deserialize message")?;
     match req {
         Request::Add { uid_a, uid_b } => match mgr.add_friend(&uid_a, &uid_b).await {
-            Err(e) => out.error(key, e).await,
-            Ok(v) => out.ok(key, v).await,
+            Err(e) => out.error(key, e),
+            Ok(v) => out.ok(key, v),
         },
         Request::Delete { uid_a, uid_b } => match mgr.delete_friend(&uid_a, &uid_b).await {
-            Err(e) => out.error(key, e).await,
-            Ok(v) => out.ok(key, v).await,
+            Err(e) => out.error(key, e),
+            Ok(v) => out.ok(key, v),
         },
         Request::Friends { uid } => match mgr.query_friends(&uid).await {
-            Err(e) => out.error(key, e).await,
-            Ok(v) => out.ok(key, v).await,
+            Err(e) => out.error(key, e),
+            Ok(v) => out.ok(key, v),
         },
         Request::Recommendation { uid } => match mgr.recommendation(&uid).await {
-            Err(e) => out.error(key, e).await,
-            Ok(v) => out.ok(key, v).await,
+            Err(e) => out.error(key, e),
+            Ok(v) => out.ok(key, v),
         },
         Request::AddNode { uid } => match mgr.add_user(&uid).await {
-            Err(e) => out.error(key, e).await,
-            Ok(v) => out.ok(key, v).await,
+            Err(e) => out.error(key, e),
+            Ok(v) => out.ok(key, v),
         },
         Request::DeleteNode { uid } => match mgr.delete_user(&uid).await {
-            Err(e) => out.error(key, e).await,
-            Ok(v) => out.ok(key, v).await,
+            Err(e) => out.error(key, e),
+            Ok(v) => out.ok(key, v),
         },
     }
 }
@@ -131,14 +113,20 @@ async fn main() {
     let p = persisters::Neo::new(graph);
     let r = redis::Client::open("redis://localhost").expect("failed to connect to redis");
     let c = cachers::Redis::new(r);
-    let mgr = core::FriendManager::new(p, c, MyLogger {});
-    let output = outputers::RedisOutput::new("redis://localhost").unwrap();
+    let mgr = Arc::new(core::FriendManager::new(p, c, MyLogger {}));
+    let output = Arc::new(outputers::RedisOutput::new("redis://localhost").unwrap());
     loop {
         for ms in k_consumer.poll().expect("failed to poll kafka").iter() {
             for m in ms.messages() {
-                if let Err(e) = handle_message(m.key, m.value, &mgr, &output).await {
-                    println!("{}", e);
-                }
+                let mgr = mgr.clone();
+                let output = output.clone();
+                let key = m.key.to_vec();
+                let value = m.value.to_vec();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_message(key, value, &mgr, output.as_ref()).await {
+                        println!("{}", e);
+                    }
+                });
                 k_consumer.commit_consumed().unwrap();
             }
         }

@@ -17,7 +17,8 @@ impl Cacher for Redis {
     fn delete<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
+    {
         Box::pin(async move {
             let mut conn = self.client.get_async_connection().await?;
             conn.del(format!("uid_{}", uid)).await?;
@@ -29,7 +30,8 @@ impl Cacher for Redis {
         &'a self,
         uid: Self::UID,
         friends: Vec<Self::UID>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
+    {
         Box::pin(async move {
             let mut conn = self.client.get_async_connection().await?;
             conn.set(
@@ -47,7 +49,11 @@ impl Cacher for Redis {
         &'a self,
         uid: Self::UID,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<Vec<Self::UID>>, Self::Error>> + 'a>,
+        Box<
+            dyn std::future::Future<Output = Result<Option<Vec<Self::UID>>, Self::Error>>
+                + Send
+                + 'a,
+        >,
     > {
         Box::pin(async move {
             let mut conn = self.client.get_async_connection().await?;

@@ -1,5 +1,4 @@
 use anyhow::Context;
-use serde::Serialize;
 use std::error::Error;
 use std::fmt::Debug;
 use std::future::Future;
@@ -11,65 +10,65 @@ pub trait Persister {
     fn insert_node<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
     fn delete_node<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
 
     fn exist_node<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + Send + 'a>>;
 
     fn insert<'a>(
         &'a self,
         uid_a: Self::UID,
         uid_b: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
 
     fn delete<'a>(
         &'a self,
         uid_a: Self::UID,
         uid_b: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
 
     fn friends<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Self::UID>, Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Self::UID>, Self::Error>> + Send + 'a>>;
 
     fn is_friend<'a>(
         &'a self,
         uid_a: Self::UID,
         uid_b: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<bool, Self::Error>> + Send + 'a>>;
 
     fn recommendations<'a>(
         &'a self,
         uid: Self::UID,
         level: i32,
         threshold: i32,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Self::UID>, Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Self::UID>, Self::Error>> + Send + 'a>>;
 }
 
 pub trait Cacher {
-    type UID;
+    type UID: Send;
     type Error: Error + Send + Sync + 'static;
 
     fn insert<'a>(
         &'a self,
         uid: Self::UID,
         friends: Vec<Self::UID>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
     fn delete<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>>;
     fn query<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<Self::UID>>, Self::Error>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<Self::UID>>, Self::Error>> + Send + 'a>>;
 }
 
 pub trait Logger {
@@ -79,14 +78,18 @@ pub trait Logger {
     fn error<'a>(&'a self, e: &'a dyn std::fmt::Display);
 }
 
-pub struct FriendManager<P: Persister, C: Cacher, L: Logger> {
+pub struct FriendManager<P: Persister + Send, C: Cacher + Send, L: Logger + Send> {
     persister: P,
     cacher: C,
     logger: L,
 }
 
-impl<U: Sized + Clone, P: Persister<UID = U>, C: Cacher<UID = U>, L: Logger>
-    FriendManager<P, C, L>
+impl<
+        U: Sized + Clone + Send,
+        P: Persister<UID = U> + Send,
+        C: Cacher<UID = U> + Send,
+        L: Logger + Send,
+    > FriendManager<P, C, L>
 {
     pub fn new(persister: P, cacher: C, logger: L) -> Self {
         Self {

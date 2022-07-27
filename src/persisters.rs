@@ -1,4 +1,5 @@
 use crate::core::Persister;
+use anyhow;
 use neo4rs::{query, Graph};
 use tokio;
 
@@ -13,37 +14,47 @@ impl Neo {
 }
 
 impl Persister for Neo {
-    type Error = neo4rs::Error;
+    type Error = anyhow::Error;
     type UID = i64;
     fn insert_node<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
+    {
         Box::pin(async move {
             self.graph
                 .run(query("CREATE (:Person{ uid: $uid })").param("uid", uid))
                 .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
         })
     }
 
     fn delete_node<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
+    {
         Box::pin(async move {
             self.graph
                 .run(query("MATCH (p: Person{ uid: $uid }) DELETE p").param("uid", uid))
                 .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
         })
     }
     fn exist_node<'a>(
         &'a self,
         uid: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, Self::Error>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, Self::Error>> + Send + 'a>>
+    {
         Box::pin(async move {
             let mut rows = self.graph.execute(query("MATCH (p: Person{ uid: $uid } ) WITH count(p) > 0 AS node_exists RETURN node_exists")
-            .param("uid", uid)).await?;
-            if let Some(row) = rows.next().await? {
+            .param("uid", uid)).await
+            .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?;
+            if let Some(row) = rows
+                .next()
+                .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?
+            {
                 return Ok(row.get("node_exists").unwrap());
             }
             unreachable!()
@@ -53,7 +64,8 @@ impl Persister for Neo {
         &'a self,
         uid_a: Self::UID,
         uid_b: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
+    {
         Box::pin(async move {
             self
                 .graph
@@ -65,6 +77,7 @@ impl Persister for Neo {
                     .param("uid_b", uid_b),
                 )
                 .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
         })
     }
 
@@ -72,7 +85,7 @@ impl Persister for Neo {
         &'a self,
         uid: Self::UID,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<Self::UID>, Self::Error>> + 'a>,
+        Box<dyn std::future::Future<Output = Result<Vec<Self::UID>, Self::Error>> + Send + 'a>,
     > {
         Box::pin(async move {
             let mut rows = self
@@ -83,9 +96,14 @@ impl Persister for Neo {
                     )
                     .param("uid", uid),
                 )
-                .await?;
+                .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?;
             let mut res = Vec::new();
-            while let Some(r) = rows.next().await? {
+            while let Some(r) = rows
+                .next()
+                .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?
+            {
                 if let Some(uid) = r.get("uid") {
                     res.push(uid);
                 }
@@ -98,14 +116,20 @@ impl Persister for Neo {
         &'a self,
         uid_a: Self::UID,
         uid_b: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, Self::Error>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, Self::Error>> + Send + 'a>>
+    {
         Box::pin(async move {
             let mut rows = self.graph.execute(
                     query("MATCH (: Person { uid: $uid_a }) -[r: BE_FRIEND_OF]- (: Person { uid: $uid_b }) WITH count(r) > 0 AS is_friend RETURN is_friend")
                     .param("uid_a", uid_a)
                     .param("uid_b", uid_b)
-                ).await?;
-            if let Some(row) = rows.next().await? {
+                ).await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?;
+            if let Some(row) = rows
+                .next()
+                .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?
+            {
                 if let Some(is_friend) = row.get("is_friend") {
                     return Ok(is_friend);
                 }
@@ -118,13 +142,15 @@ impl Persister for Neo {
         &'a self,
         uid_a: Self::UID,
         uid_b: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
+    {
         Box::pin(async move {
             self.graph.run(
                     query("MATCH (a:Person{ uid: $uid_a }), (b: Person{ uid: $uid_b }) CREATE (a) -[:BE_FRIEND_OF]-> (b)")
                     .param("uid_a", uid_a)
                     .param("uid_b", uid_b)
                 ).await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
         })
     }
 
@@ -134,7 +160,7 @@ impl Persister for Neo {
         level: i32,
         threshold: i32,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<Self::UID>, Self::Error>> + 'a>,
+        Box<dyn std::future::Future<Output = Result<Vec<Self::UID>, Self::Error>> + Send + 'a>,
     > {
         Box::pin(async move {
             let mut rows = self
@@ -150,9 +176,14 @@ impl Persister for Neo {
                     .param("uid", uid)
                     .param("threshold", threshold as i64),
                 )
-                .await?;
+                .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?;
             let mut res = Vec::new();
-            while let Some(row) = rows.next().await? {
+            while let Some(row) = rows
+                .next()
+                .await
+                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?
+            {
                 if let Some(uid) = row.get("dst_uid") {
                     res.push(uid);
                 }
