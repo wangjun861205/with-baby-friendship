@@ -1,4 +1,5 @@
 mod cachers;
+mod client;
 mod core;
 mod outputers;
 mod persisters;
