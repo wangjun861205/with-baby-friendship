@@ -1,109 +1,77 @@
 use crate::core::Persister;
-use anyhow;
+use crate::error::Error;
 use neo4rs::{query, Graph};
-use tokio;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
 pub struct Neo {
-    graph: Graph,
+    graph: Arc<Graph>,
 }
 
 impl Neo {
-    pub fn new(graph: Graph) -> Self {
+    pub fn new(graph: Arc<Graph>) -> Self {
         Self { graph }
     }
 }
 
 impl Persister for Neo {
-    type Error = anyhow::Error;
-    type UID = i64;
-    fn insert_node<'a>(
-        &'a self,
-        uid: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
-    {
+    type UID = String;
+    fn insert_node(&self, uid: Self::UID) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
+        let graph = self.graph.clone();
         Box::pin(async move {
-            self.graph
+            graph
                 .run(query("CREATE (:Person{ uid: $uid })").param("uid", uid))
                 .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
+                .map_err(|e| Error::new_500(format!("{:?}", e)))
         })
     }
 
-    fn delete_node<'a>(
-        &'a self,
-        uid: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
-    {
+    fn delete_node(&self, uid: Self::UID) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
+        let graph = self.graph.clone();
         Box::pin(async move {
-            self.graph
+            graph
                 .run(query("MATCH (p: Person{ uid: $uid }) DELETE p").param("uid", uid))
                 .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
+                .map_err(|e| Error::new_500(format!("{:?}", e)))
         })
     }
-    fn exist_node<'a>(
-        &'a self,
-        uid: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, Self::Error>> + Send + 'a>>
-    {
+    fn exist_node(&self, uid: Self::UID) -> Pin<Box<dyn Future<Output = Result<bool, Error>>>> {
+        let graph = self.graph.clone();
         Box::pin(async move {
-            let mut rows = self.graph.execute(query("MATCH (p: Person{ uid: $uid } ) WITH count(p) > 0 AS node_exists RETURN node_exists")
-            .param("uid", uid)).await
-            .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?;
-            if let Some(row) = rows
-                .next()
+            let mut rows = graph
+                .execute(query("MATCH (p: Person{ uid: $uid } ) WITH count(p) > 0 AS node_exists RETURN node_exists").param("uid", uid))
                 .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?
-            {
+                .map_err(|e| Error::new_500(format!("{:?}", e)))?;
+            if let Some(row) = rows.next().await.map_err(|e| Error::new_500(format!("{:?}", e)))? {
                 return Ok(row.get("node_exists").unwrap());
             }
             unreachable!()
         })
     }
-    fn delete<'a>(
-        &'a self,
-        uid_a: Self::UID,
-        uid_b: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
-    {
+    fn delete(&self, uid_a: Self::UID, uid_b: Self::UID) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
+        let graph = self.graph.clone();
         Box::pin(async move {
-            self
-                .graph
+            graph
                 .run(
-                    query(
-                        "MATCH (:Person{uid: $uid_a}) -[r:BE_FRIEND_OF]- (:Person{uid: $uid_b}) DELETE r",
-                    )
-                    .param("uid_a", uid_a)
-                    .param("uid_b", uid_b),
+                    query("MATCH (:Person{uid: $uid_a}) -[r:BE_FRIEND_OF]- (:Person{uid: $uid_b}) DELETE r")
+                        .param("uid_a", uid_a)
+                        .param("uid_b", uid_b),
                 )
                 .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
+                .map_err(|e| Error::new_500(format!("{:?}", e)))
         })
     }
 
-    fn friends<'a>(
-        &'a self,
-        uid: Self::UID,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<Self::UID>, Self::Error>> + Send + 'a>,
-    > {
+    fn friends(&self, uid: Self::UID) -> Pin<Box<dyn Future<Output = Result<Vec<Self::UID>, Error>>>> {
+        let graph = self.graph.clone();
         Box::pin(async move {
-            let mut rows = self
-                .graph
-                .execute(
-                    query(
-                        "MATCH (:Person { uid: $uid }) -[:BE_FRIEND_OF]- (b:Person) RETURN b.uid AS uid ORDER BY uid",
-                    )
-                    .param("uid", uid),
-                )
+            let mut rows = graph
+                .execute(query("MATCH (:Person { uid: $uid }) -[:BE_FRIEND_OF]- (b:Person) RETURN b.uid AS uid ORDER BY uid").param("uid", uid))
                 .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?;
+                .map_err(|e| Error::new_500(format!("{:?}", e)))?;
             let mut res = Vec::new();
-            while let Some(r) = rows
-                .next()
-                .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?
-            {
+            while let Some(r) = rows.next().await.map_err(|e| Error::new_500(format!("{:?}", e)))? {
                 if let Some(uid) = r.get("uid") {
                     res.push(uid);
                 }
@@ -112,24 +80,18 @@ impl Persister for Neo {
         })
     }
 
-    fn is_friend<'a>(
-        &'a self,
-        uid_a: Self::UID,
-        uid_b: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, Self::Error>> + Send + 'a>>
-    {
+    fn is_friend(&self, uid_a: Self::UID, uid_b: Self::UID) -> Pin<Box<dyn Future<Output = Result<bool, Error>>>> {
+        let graph = self.graph.clone();
         Box::pin(async move {
-            let mut rows = self.graph.execute(
+            let mut rows = graph
+                .execute(
                     query("MATCH (: Person { uid: $uid_a }) -[r: BE_FRIEND_OF]- (: Person { uid: $uid_b }) WITH count(r) > 0 AS is_friend RETURN is_friend")
-                    .param("uid_a", uid_a)
-                    .param("uid_b", uid_b)
-                ).await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?;
-            if let Some(row) = rows
-                .next()
+                        .param("uid_a", uid_a)
+                        .param("uid_b", uid_b),
+                )
                 .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?
-            {
+                .map_err(|e| Error::new_500(format!("{:?}", e)))?;
+            if let Some(row) = rows.next().await.map_err(|e| Error::new_500(format!("{:?}", e)))? {
                 if let Some(is_friend) = row.get("is_friend") {
                     return Ok(is_friend);
                 }
@@ -138,33 +100,24 @@ impl Persister for Neo {
         })
     }
 
-    fn insert<'a>(
-        &'a self,
-        uid_a: Self::UID,
-        uid_b: Self::UID,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Self::Error>> + Send + 'a>>
-    {
+    fn insert(&self, uid_a: Self::UID, uid_b: Self::UID) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
+        let graph = self.graph.clone();
         Box::pin(async move {
-            self.graph.run(
+            graph
+                .run(
                     query("MATCH (a:Person{ uid: $uid_a }), (b: Person{ uid: $uid_b }) CREATE (a) -[:BE_FRIEND_OF]-> (b)")
-                    .param("uid_a", uid_a)
-                    .param("uid_b", uid_b)
-                ).await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))
+                        .param("uid_a", uid_a)
+                        .param("uid_b", uid_b),
+                )
+                .await
+                .map_err(|e| Error::new_500(format!("{:?}", e)))
         })
     }
 
-    fn recommendations<'a>(
-        &'a self,
-        uid: Self::UID,
-        level: i32,
-        threshold: i32,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<Self::UID>, Self::Error>> + Send + 'a>,
-    > {
+    fn recommendations(&self, uid: Self::UID, level: i32, threshold: i32) -> Pin<Box<dyn Future<Output = Result<Vec<Self::UID>, Error>>>> {
+        let graph = self.graph.clone();
         Box::pin(async move {
-            let mut rows = self
-                .graph
+            let mut rows = graph
                 .execute(
                     query(&format!(
                         "MATCH (a:Person) -[:BE_FRIEND_OF * {}]- (b:Person)
@@ -177,13 +130,9 @@ impl Persister for Neo {
                     .param("threshold", threshold as i64),
                 )
                 .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?;
+                .map_err(|e| Error::new_500(format!("{:?}", e)))?;
             let mut res = Vec::new();
-            while let Some(row) = rows
-                .next()
-                .await
-                .map_err(|e| anyhow::Error::msg(format!("{:?}", e)))?
-            {
+            while let Some(row) = rows.next().await.map_err(|e| Error::new_500(format!("{:?}", e)))? {
                 if let Some(uid) = row.get("dst_uid") {
                     res.push(uid);
                 }
@@ -204,18 +153,11 @@ mod test {
         dotenv::dotenv().expect("failed to load environment variables");
         let username = dotenv::var("NEO4J_USERNAME").expect("failed to get NEO4J_USERNAME");
         let password = dotenv::var("NEO4J_PASSWORD").expect("failed to get NEO4J_PASSWORD");
-        let graph = Graph::new("localhost:7687", &username, &password)
-            .await
-            .expect("failed to connect to neo4j");
-        let neo = Neo::new(graph);
-        neo.insert_node(1).await.expect("failed to insert node");
-        assert!(
-            neo.exist_node(1)
-                .await
-                .expect("failed to check node exists")
-                == true
-        );
-        neo.delete_node(1).await.expect("failed to delete node");
+        let graph = Graph::new("localhost:7687", &username, &password).await.expect("failed to connect to neo4j");
+        let neo = Neo::new(Arc::new(graph));
+        neo.insert_node(1.to_string()).await.expect("failed to insert node");
+        assert!(neo.exist_node(1.to_string()).await.expect("failed to check node exists") == true);
+        neo.delete_node(1.to_string()).await.expect("failed to delete node");
     }
 
     #[tokio::test]
@@ -223,22 +165,15 @@ mod test {
         dotenv::dotenv().expect("failed to load environment variables");
         let username = dotenv::var("NEO4J_USERNAME").expect("failed to get NEO4J_USERNAME");
         let password = dotenv::var("NEO4J_PASSWORD").expect("failed to get NEO4J_PASSWORD");
-        let graph = Graph::new("localhost:7687", &username, &password)
-            .await
-            .expect("failed to connect to neo4j");
-        let neo = Neo::new(graph);
-        neo.insert_node(1).await.expect("failed to insert node");
-        neo.insert_node(2).await.expect("failed to insert node");
-        neo.insert(1, 2).await.expect("failed to insert relation");
-        assert!(
-            neo.is_friend(1, 2)
-                .await
-                .expect("failed to check is friend")
-                == true
-        );
-        neo.delete(1, 2).await.expect("failed to delete relation");
-        neo.delete_node(1).await.expect("failed to delete node");
-        neo.delete_node(2).await.expect("failed to delete node");
+        let graph = Graph::new("localhost:7687", &username, &password).await.expect("failed to connect to neo4j");
+        let neo = Neo::new(Arc::new(graph));
+        neo.insert_node(1.to_string()).await.expect("failed to insert node");
+        neo.insert_node(2.to_string()).await.expect("failed to insert node");
+        neo.insert(1.to_string(), 2.to_string()).await.expect("failed to insert relation");
+        assert!(neo.is_friend(1.to_string(), 2.to_string()).await.expect("failed to check is friend") == true);
+        neo.delete(1.to_string(), 2.to_string()).await.expect("failed to delete relation");
+        neo.delete_node(1.to_string()).await.expect("failed to delete node");
+        neo.delete_node(2.to_string()).await.expect("failed to delete node");
     }
 
     #[tokio::test]
@@ -246,22 +181,20 @@ mod test {
         dotenv::dotenv().expect("failed to load environment variables");
         let username = dotenv::var("NEO4J_USERNAME").expect("failed to get NEO4J_USERNAME");
         let password = dotenv::var("NEO4J_PASSWORD").expect("failed to get NEO4J_PASSWORD");
-        let graph = Graph::new("localhost:7687", &username, &password)
-            .await
-            .expect("failed to connect to neo4j");
-        let neo = Neo::new(graph);
-        neo.insert_node(1).await.expect("failed to insert node");
-        neo.insert_node(2).await.expect("failed to insert node");
-        neo.insert_node(3).await.expect("failed to insert node");
-        neo.insert(1, 2).await.expect("failed to insert relation");
-        neo.insert(1, 3).await.expect("failed to insert relation");
-        let friends = neo.friends(1).await.expect("failed to get friends");
-        assert!(friends == vec![2, 3]);
-        neo.delete(1, 2).await.expect("failed to delete relation");
-        neo.delete(1, 3).await.expect("failed to delete relation");
-        neo.delete_node(1).await.expect("failed to delete node");
-        neo.delete_node(2).await.expect("failed to delete node");
-        neo.delete_node(3).await.expect("failed to delete node");
+        let graph = Graph::new("localhost:7687", &username, &password).await.expect("failed to connect to neo4j");
+        let neo = Neo::new(Arc::new(graph));
+        neo.insert_node(1.to_string()).await.expect("failed to insert node");
+        neo.insert_node(2.to_string()).await.expect("failed to insert node");
+        neo.insert_node(3.to_string()).await.expect("failed to insert node");
+        neo.insert(1.to_string(), 2.to_string()).await.expect("failed to insert relation");
+        neo.insert(1.to_string(), 3.to_string()).await.expect("failed to insert relation");
+        let friends = neo.friends(1.to_string()).await.expect("failed to get friends");
+        assert!(friends == vec![2.to_string(), 3.to_string()]);
+        neo.delete(1.to_string(), 2.to_string()).await.expect("failed to delete relation");
+        neo.delete(1.to_string(), 3.to_string()).await.expect("failed to delete relation");
+        neo.delete_node(1.to_string()).await.expect("failed to delete node");
+        neo.delete_node(2.to_string()).await.expect("failed to delete node");
+        neo.delete_node(3.to_string()).await.expect("failed to delete node");
     }
 
     #[tokio::test]
@@ -269,30 +202,25 @@ mod test {
         dotenv::dotenv().expect("failed to load environment variables");
         let username = dotenv::var("NEO4J_USERNAME").expect("failed to get NEO4J_USERNAME");
         let password = dotenv::var("NEO4J_PASSWORD").expect("failed to get NEO4J_PASSWORD");
-        let graph = Graph::new("localhost:7687", &username, &password)
-            .await
-            .expect("failed to connect to neo4j");
-        let neo = Neo::new(graph);
-        neo.insert_node(1).await.expect("failed to insert node");
-        neo.insert_node(2).await.expect("failed to insert node");
-        neo.insert_node(3).await.expect("failed to insert node");
-        neo.insert_node(4).await.expect("failed to insert node");
-        neo.insert(1, 2).await.expect("failed to insert relation");
-        neo.insert(1, 3).await.expect("failed to insert relation");
-        neo.insert(2, 4).await.expect("failed to insert relation");
-        neo.insert(3, 4).await.expect("failed to insert relation");
-        let rs = neo
-            .recommendations(1, 2, 2)
-            .await
-            .expect("failed to get recommendation");
-        neo.delete(1, 2).await.expect("failed to delete relation");
-        neo.delete(1, 3).await.expect("failed to delete relation");
-        neo.delete(2, 4).await.expect("failed to delete relation");
-        neo.delete(3, 4).await.expect("failed to delete relation");
-        neo.delete_node(1).await.expect("failed to delete node");
-        neo.delete_node(2).await.expect("failed to delete node");
-        neo.delete_node(3).await.expect("failed to delete node");
-        neo.delete_node(4).await.expect("failed to delete node");
-        assert!(rs == vec![4]);
+        let graph = Graph::new("localhost:7687", &username, &password).await.expect("failed to connect to neo4j");
+        let neo = Neo::new(Arc::new(graph));
+        neo.insert_node(1.to_string()).await.expect("failed to insert node");
+        neo.insert_node(2.to_string()).await.expect("failed to insert node");
+        neo.insert_node(3.to_string()).await.expect("failed to insert node");
+        neo.insert_node(4.to_string()).await.expect("failed to insert node");
+        neo.insert(1.to_string(), 2.to_string()).await.expect("failed to insert relation");
+        neo.insert(1.to_string(), 3.to_string()).await.expect("failed to insert relation");
+        neo.insert(2.to_string(), 4.to_string()).await.expect("failed to insert relation");
+        neo.insert(3.to_string(), 4.to_string()).await.expect("failed to insert relation");
+        let rs = neo.recommendations(1.to_string(), 2, 2).await.expect("failed to get recommendation");
+        neo.delete(1.to_string(), 2.to_string()).await.expect("failed to delete relation");
+        neo.delete(1.to_string(), 3.to_string()).await.expect("failed to delete relation");
+        neo.delete(2.to_string(), 4.to_string()).await.expect("failed to delete relation");
+        neo.delete(3.to_string(), 4.to_string()).await.expect("failed to delete relation");
+        neo.delete_node(1.to_string()).await.expect("failed to delete node");
+        neo.delete_node(2.to_string()).await.expect("failed to delete node");
+        neo.delete_node(3.to_string()).await.expect("failed to delete node");
+        neo.delete_node(4.to_string()).await.expect("failed to delete node");
+        assert!(rs == vec![4.to_string()]);
     }
 }

@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  namespace: with-baby-friendship
+  name: neo4j-0
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Recycle
+  storageClassName: neo4j
+  hostPath:
+    path: /tmp/neo4j_0
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  namespace: with-baby-friendship
+  name: neo4j-1
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Recycle
+  storageClassName: neo4j
+  hostPath:
+    path: /tmp/neo4j_1
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  namespace: with-baby-friendship
+  name: neo4j-2
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Recycle
+  storageClassName: neo4j
+  hostPath:
+    path: /tmp/neo4j_2

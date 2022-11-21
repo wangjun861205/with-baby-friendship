@@ -1,0 +1,20 @@
+neo4j:
+  name: "neo4j"
+  minimumClusterSize: 3
+  resources:
+    cpu: "0.5"
+    memory: "2Gi"
+  password: "Wt20110523"
+  edition: enterprise
+  acceptLicenseAgreement: "yes"
+
+volumes:
+  data:
+    mode: volumeClaimTemplate
+    volumeClaimTemplate:
+      storageClassName: neo4j
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi

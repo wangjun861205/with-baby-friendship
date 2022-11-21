@@ -1,0 +1,90 @@
+openapi: 3.0.0
+
+
+info:
+  title: 用户好友关系管理服务
+  version: "1.0:"
+paths:
+  /users/{uid}:
+    post:
+      description: 添加用户
+      parameters:
+        - name: uid
+          in: path
+          schema:
+            type: string
+          required: true
+
+      responses:
+        200:
+          description: 成功添加
+        500:
+          description: 其他错误
+
+  /users/{uid_a}/friends/{uid_b}:
+    post:
+      description: 添加好友关系
+      parameters:
+        - name: uid_a
+          in: path
+          schema:
+            type: string
+          required: true
+        - name: uid_b
+          in: path
+          schema:
+            type: string
+          required: true
+      responses:
+        200:
+          description: 成功添加
+        500:
+          description: 其他错误
+  
+    delete:
+      description: 解除好友关系
+      parameters:
+        - name: uid_a
+          in: path
+          schema:
+            type: string
+          required: true
+        - name: uid_b
+          in: path
+          schema:
+            type: string
+          required: true
+      responses:
+        200:
+          description: 成功解除
+        500:
+          description: 其他错误
+
+    get:
+      description: 检查是否是好友关系
+      parameters:
+        - name: uid_a
+          required: true
+          in: path
+          schema:
+            type: string
+        - name: uid_b
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        200: 
+          description: 是好友关系
+        404:
+          description: 不是好友关系
+        500:
+          description: 其他错误
+          
+          
+
+      
+
+                
+
+

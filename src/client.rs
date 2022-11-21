@@ -3,14 +3,16 @@ use core::time;
 use anyhow::Error;
 use chrono::prelude::*;
 use rdkafka::{
-    producer::{FutureProducer as KafkaProducer, FutureRecord},
+    producer::{
+        future_producer::FutureProducerContext, FutureProducer as KafkaProducer, FutureRecord,
+    },
     util::Timeout,
 };
 use redis::{aio::Connection as RedisConnection, AsyncCommands};
 use serde::Serialize;
 use tokio;
 
-pub async fn gen_key(redis: &mut RedisConnection, uid: i32) -> Result<String, Error> {
+async fn gen_key(redis: &mut RedisConnection, uid: i64) -> Result<String, Error> {
     let seq: i32 = redis.incr(format!("{}_seq", uid), 1).await?;
     Ok(format!("{}-{}", Utc::now().timestamp(), seq))
 }
@@ -18,7 +20,7 @@ pub async fn gen_key(redis: &mut RedisConnection, uid: i32) -> Result<String, Er
 pub async fn request<T: Send + Serialize>(
     redis: &mut RedisConnection,
     kafka: &KafkaProducer,
-    uid: i32,
+    uid: i64,
     topic: String,
     req: T,
     read_timeout: usize,
@@ -43,12 +45,30 @@ pub async fn request<T: Send + Serialize>(
     Ok(res.pop().unwrap())
 }
 
+use crate::Request;
+
+pub async fn add_node(
+    uid: i64,
+    redis: &mut RedisConnection,
+    kafka: &KafkaProducer,
+) -> Result<String, Error> {
+    request(
+        redis,
+        kafka,
+        uid,
+        "friendship".into(),
+        Request::AddNode { uid: uid },
+        10,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod test {
-    use rdkafka::config::{ClientConfig as KafkaConfig, FromClientConfig};
+    use rdkafka::config::ClientConfig as KafkaConfig;
     use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
     use rdkafka::producer::FutureProducer as KafkaProducer;
-    use rdkafka::util::{DefaultRuntime, Timeout, TokioRuntime};
+    use rdkafka::util::TokioRuntime;
     use rdkafka::Message;
     use redis::{AsyncCommands, Client as RedisClient};
     use std::str::from_utf8;
